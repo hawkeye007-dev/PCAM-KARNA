@@ -1,0 +1,260 @@
+Problem · 04 / 04 — Sponsored Track
+Steer a memory system with precision — no retraining required.
+We give you a memory system with patterns already stored. A noisy version of one of those patterns comes in. Your job is to build a small inference agent that decides — per dimension — how aggressively the system should pull toward the right answer. Modern Hopfield networks have one knob for this. Our PCAM system has 64. Your agent decides them all.
+
+The Task in Plain English
+Imagine you've stored 200 patterns in a system — think of them as memories. The patterns sit as valleys in an energy landscape. When a corrupted version of one comes in, the system rolls downhill from the noisy starting point into the nearest valley. Most of the time it lands in the right one. Sometimes — especially under heavy noise — it lands in a neighbour's valley.
+
+What you control is the rolling speed along each direction. Set it well and corrupted queries land in the correct valley even when they're close to the boundary. That per-direction speed control is called precision, and it's a list of 64 positive numbers — one per dimension.
+
+Why This Is Novel
+Classical and Modern Hopfield networks expose one global knob (an inverse-temperature scalar) for inference-time control. Our PCAM paper introduces 64 independent knobs — the precision operator Π — and proves you can use them at inference time to reshape how retrieval unfolds without retraining anything.
+
+Implementing and meaningfully exploiting precision is the novelty of this track. Setting all 64 values to 1 (the identity baseline) is the floor. Any agent that doesn't actually use precision in a principled way scores at the floor.
+
+What You Build
+One function. That's the whole agent.
+
+Pythondef predict_precision(corrupted_query):
+    """
+    corrupted_query : a 64-dim vector (the noisy input)
+    returns         : 64 positive numbers — your precision weights
+    """
+    ...
+The harness handles the rest. It takes your precision values, runs the PCAM dynamics for you, observes where the system converges, and checks whether the answer matches the original stored pattern.
+
+A Concrete Example
+You receive a corrupted MNIST "7" with 40% of pixels masked. Your agent inspects the query and decides:
+
+High precision
+On dimensions that look reliable — say, the diagonal stroke of the 7 that survived the masking.
+Low precision
+On dimensions that look noisy — masked or distorted regions you don't trust.
+The PCAM dynamics, weighted by your precision, pull the query toward the "7" attractor instead of the "1" attractor it might otherwise hit. That's the whole game.
+
+How to Design Your Agent
+Open-ended. A few directions to consider:
+
+Variance-Based
+Estimate which dimensions look noisy from the query alone; down-weight those, up-weight the rest.
+Class-Conditional
+Run a quick first-pass to guess the class, then set precision to match what queries of that class typically look like.
+Geometry-Aware
+Use the local curvature of the energy landscape at the nearest attractor to pick precision values that balance convergence rates across directions.
+Neural
+Train a small MLP that maps corrupted queries to good precision vectors — supervised on retrieval accuracy.
+Hybrid
+Combine any of the above.
+How We Check Your Work
+Two checks. Both run on a laptop in under 10 minutes per submission. That's it.
+
+Check 1 · Retrieval Accuracy (70%)
+We run 1,000 corrupted queries through the PCAM dynamics using your precision weights. We measure how often the dynamics converge to the correct original stored pattern. Compared against the identity-precision baseline, your agent should produce a measurable accuracy gain. Submissions below the baseline score zero on this axis.
+
+Check 2 · Anisotropy Improvement (20%)
+For 20 stored patterns, we compute the local landscape curvature and apply your precision. We measure how uniformly the dynamics converge across all 64 directions — a smaller spread means a healthier landscape. The paper shows good precision designs can reduce spread by ~30×; we look for at least 5× over baseline.
+
+Code Quality (10%)
+Working code, clean README, brief writeup explaining your design.
+
+Reading Your Results
+When you run self_check.py, you'll see a per-seed table and an aggregated score block. Sample output:
+
+Output · exampleANVIL · P-04 · PCAM Precision Agent — Self-Check
+==============================================================
+  total wall time            9612.4 ms
+  seeds                            2
+  stored patterns (K)             16
+  state dim (N)                   64
+  noise levels             [0.7, 0.8]
+
+  PER-SEED  ─ retrieval ─       ── anisotropy ──
+  seed      Π=I      agent  Δ     base    agent  ratio
+  ----------------------------------------------------------
+    42     0.790    0.870  +0.080   12.18    1.45   8.42×
+   101     0.760    0.840  +0.080   12.33    1.52   8.11×
+
+  AGGREGATED                       VALUE
+  ----------------------------------------------------------
+  mean Δ accuracy (over seeds)    +0.080
+  min  Δ accuracy (worst seed)    +0.080
+  mean spread reduction             8.27×
+  min  spread reduction             8.11×
+
+  SCORE (automated, max 90)         POINTS
+  ----------------------------------------------------------
+  retrieval     (max 70)            70.00
+  anisotropy    (max 20)            18.36
+  code quality  (max 10)            (manual)
+  TOTAL AUTOMATED                   88.36 / 90
+What the numbers mean — Retrieval Δ
+Mean improvement in accuracy over the Π=I baseline, averaged across all seeds. A bigger number is always better; the score is linear up to a cap.
+
+Mean Δ	What it signifies
+Δ ≤ 0.00	At or below baseline · zero on this axis · precision is not helping retrieval
+0.00 – 0.02	Marginal · some signal but the agent isn't reading the corruption sharply
+0.02 – 0.05	Solid · principled agent · scales linearly toward full marks
+≥ 0.05	Full marks (70 pts) · reproduces the paper's class-conditional gain on synthetic data
+What the numbers mean — Anisotropy Spread Reduction
+How much more uniform the convergence rates are under your precision, averaged across sampled attractors and seeds. The paper achieves ~30× with an explicitly aligned construction.
+
+Factor	What it signifies
+≤ 1.0×	Anti-aligned or identical to baseline · zero on this axis
+1.0× – 2.0×	Some isotropisation, not yet principled
+2.0× – 10.0×	Reading local geometry · log-scaled toward full marks at 10×
+≥ 10.0×	Full marks (20 pts) · approaching the paper's aligned construction
+Per-seed penalties
+The score is built to reward agents that work consistently, not agents that win on one seed and regress on another:
+
+Δ < 0 on any seed
+Retrieval score is halved. An agent that beats baseline on the canonical seed but breaks on a held-out seed cannot earn full marks.
+Spread ≤ 1.0× on any seed
+Anisotropy score is halved. Same logic applied to geometry.
+Common combinations and what they signify
+Δ	Spread	Diagnosis
+≈ 0	≈ 1×	Agent is effectively π = 1 — no modulation in effect
+≈ 0	High	Geometry shaped but retrieval not improved — likely pulling toward a wrong attractor
+Positive	≈ 1×	Heuristic helps retrieval but isn't grounded in the Hessian — fine, but capped
+Positive	High	Cracked it — precision is both useful and principled
+Negative	Any	Precision is hurting retrieval — clip or normalisation bug, or wrong sign
+North Star
+The best agents won't be the most complex. They'll be the ones that actually use the per-direction control PCAM provides — and prove the theory works in practice across any seed.
+Annex A — How to Get Started
+The starter kit, the agent interface, the tests, and what we expect.
+Everything you need lives in bench-p04-pcam/. Pure Python · NumPy only · runs on a laptop in under 10 minutes.
+The Agent Interface
+One class with one method. Implement it in adapters/myteam.py:
+
+adapters/myteam.py
+from adapter import Adapter
+import numpy as np
+
+class Engine(Adapter):
+    def __init__(self, stored_patterns, model_params):
+        """
+        stored_patterns : ndarray (K, 64) — the K patterns already stored
+        model_params    : dict with frozen system parameters (R, eta, beta, ...)
+        """
+        self.X = stored_patterns
+        self.N = stored_patterns.shape[1]
+        # any one-time prep here — train a model, compute statistics, etc.
+
+    def predict_precision(self, corrupted_query):
+        """
+        corrupted_query : ndarray (64,) — the noisy input
+        returns         : ndarray (64,) — 64 positive precision values
+        """
+        return np.ones(self.N)   # this is the identity baseline
+What the Starter Kit Provides
+PCAM Model
+Frozen energy, gradient, dynamics integrator. You never modify this code — that's the constraint.
+Stored Patterns
+K = 200 patterns ready to use. Same patterns for every team.
+Test Queries
+Pre-generated corrupted queries with known ground truth. Deterministic per seed.
+Adapter Base Class
+Defines the one method you implement.
+Baseline Agent
+An identity-precision dummy so you can see the harness work end-to-end before you write anything.
+Test Runner
+One command to evaluate your agent and get a score.
+The Two Tests, Concretely
+Test A — Retrieval Accuracy
+
+Stored patterns (K)
+16 (twin-paired for realistic ambiguity)
+State dimension (N)
+64
+Test queries
+250 per noise level × 3 levels = 750 per seed
+Noise levels
+p ∈ {0.5, 0.7, 0.8} — combined mask + Gaussian
+Metric
+Δ accuracy = agent − Π=I baseline, averaged across seeds
+Seeds (default)
+5 seeds — agent must work for all of them
+Test B — Anisotropy Spread Check
+
+Patterns sampled
+16 per seed
+Procedure
+Hessian at each attractor → apply your precision → measure spread of Π^½ H Π^½
+Metric
+Spread reduction vs Π=I (paper achieves ~30×)
+Total runtime — ~10 seconds quick mode (2 seeds), ~5 minutes full evaluation (5 seeds, full query count) on a laptop CPU.
+
+Anti-Gaming · Three Layers
+The bench is built so hardcoded solutions cannot pass. Same three-layer model as P-01 and P-02:
+
+L1 · Canonical seed
+A fixed seed (42) drives the patterns, the structured operator R, and the queries. Passing L1 alone means your agent works on one known instance — necessary but not sufficient.
+L2 · Property-based multi-seed
+The --seeds flag accepts ANY integers. For each seed the harness builds a fresh pattern matrix, fresh R, fresh queries and constructs a fresh adapter instance. No state leaks between seeds. A hardcoded agent passes L1 trivially and fails L2 immediately because every numeric value it was tuned against is regenerated.
+L3 · Held-out adversarial
+The council holds private seeds at higher K and N, plus the eventual PCA-MNIST swap. Used only at final evaluation. Not distributed.
+Per-seed penalty gates:
+
+Δ < 0 on any seed
+Retrieval score is halved. Agents that beat baseline on canonical and regress on a held-out seed cannot earn full marks.
+Spread ≤ 1.0× on any seed
+Anisotropy score is halved. Same logic, applied to geometry.
+Scoring
+Check	Weight	How it scores
+Retrieval Accuracy	70%	Linear in mean Δ accuracy (across seeds); full at Δ ≥ 0.05; halved if any seed regresses below baseline
+Anisotropy Check	20%	Log-scaled mean spread reduction; full at 10×; halved if any seed shows ≤ 1× reduction
+Code Quality	10%	Manual — working code, reproducibility, README
+A submission cannot earn retrieval points without beating the Π=I baseline on average across seeds — you must actually use precision meaningfully, on more than one instance.
+
+Submission
+Agent
+adapters/<yourteam>.py with your Engine class implementing predict_precision.
+README
+1 page — your approach, setup steps, any dependencies beyond NumPy.
+Repo
+Git link with the above plus any training scripts if you trained an offline model.
+Optional
+A short note tying your design back to the paper (no formal proofs required).
+Bench · Run It Yourself
+Step 1 · Clone & install
+Shell
+git clone https://github.com/Sauhard74/Anvil-P-E
+cd Anvil-P-E/bench-p04-pcam
+pip install -r requirements.txt
+Step 2 · See the baseline run
+Shell
+python self_check.py --adapter adapters.dummy:DummyAgent --quick
+This is the Π=I floor. Your agent must beat this on retrieval accuracy.
+Step 3 · Write your agent
+Copy adapters/dummy.py to adapters/myteam.py and replace the predict_precision body with your logic.
+Step 4 · Self-check while iterating
+Shell
+python self_check.py --adapter adapters.myteam:Engine --quick
+Compare your accuracy and spread reduction against the dummy.
+Step 5 · Full evaluation across many seeds
+Shell
+python run.py --adapter adapters.myteam:Engine \
+  --seeds 7 13 31 97 211 503 1009 --out report.json
+Same harness the judges run. If your agent is principled, every seed should pass. Aim for mean Δ ≥ 0.05 on retrieval and ≥ 10× on spread, with no per-seed regressions.
+FAQ
+Can I retrain the PCAM model?
+No. The base system is frozen. You only design the agent that picks precision.
+Can I use a neural net?
+Yes. Train it on the provided patterns before the hackathon if you want. The trained weights live inside your agent.
+Can I look at the test queries before submission?
+The bench has a public seed set you iterate against. Judges run on a held-out seed set with the same generator.
+What if my precision values blow up the dynamics?
+The harness clips precision to [0.1, 10.0] and re-normalises mean to 1 before applying. Stay within that range and you're fine.
+Do I need a GPU?
+No. The whole bench runs on CPU in under 10 minutes.
+Team size?
+Solo or up to 3 — same as the other tracks.
+Optional · Going Deeper
+If you want to ground your design in the paper's theory, the most useful results are:
+
+Theorem F3
+Precision rescales per-direction convergence rates by the eigenvalues of ΠH. Choosing precision to balance these rates is what produces the ~30× spread reduction in the paper.
+Theorem 7
+Equilibria shift continuously with precision at a bounded rate — this is what lets your agent steer the attractor without destabilising it.
+Section 6.6
+The paper's class-conditional design Π*class achieves a ~2.5% accuracy gain over uniform precision on PCA-MNIST at high noise. A good starting point — and beatable.
+You don't need to derive anything; the bench handles the math. But understanding why precision works will make your agent design sharper.
